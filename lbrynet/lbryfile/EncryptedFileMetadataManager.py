@@ -11,7 +11,7 @@ from lbrynet.core.sqlite_helpers import rerun_if_locked
 log = logging.getLogger(__name__)
 
 
-class DBLBRYFileMetadataManager(object):
+class DBEncryptedFileMetadataManager(object):
     """Store and provide access to LBRY file metadata using sqlite"""
 
     def __init__(self, db_dir):
@@ -236,14 +236,14 @@ class DBLBRYFileMetadataManager(object):
 
     @rerun_if_locked
     def _get_sd_blob_hashes_for_stream(self, stream_hash):
-        log.info("Looking up sd blob hashes for stream hash %s", str(stream_hash))
+        log.debug("Looking up sd blob hashes for stream hash %s", str(stream_hash))
         d = self.db_conn.runQuery("select sd_blob_hash from lbry_file_descriptors where stream_hash = ?",
                                   (stream_hash,))
         d.addCallback(lambda results: [r[0] for r in results])
         return d
 
 
-class TempLBRYFileMetadataManager(object):
+class TempEncryptedFileMetadataManager(object):
     def __init__(self):
         self.streams = {}
         self.stream_blobs = {}

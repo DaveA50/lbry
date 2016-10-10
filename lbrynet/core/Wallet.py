@@ -17,15 +17,15 @@ from decimal import Decimal
 
 from lbryum import SimpleConfig, Network
 from lbryum.lbrycrd import COIN
-from lbryum.wallet import WalletStorage, Wallet
+import lbryum.wallet
 from lbryum.commands import known_commands, Commands
 from lbryum.transaction import Transaction
 
-from lbrynet.interfaces import IRequestCreator, IQueryHandlerFactory, IQueryHandler, ILBRYWallet
+from lbrynet.interfaces import IRequestCreator, IQueryHandlerFactory, IQueryHandler, IWallet
 from lbrynet.core.client.ClientRequest import ClientRequest
 from lbrynet.core.Error import UnknownNameError, InvalidStreamInfoError, RequestCanceledError
 from lbrynet.core.Error import InsufficientFundsError
-from lbrynet.metadata.LBRYMetadata import Metadata
+from lbrynet.metadata.Metadata import Metadata
 
 log = logging.getLogger(__name__)
 alert = logging.getLogger("lbryalert." + __name__)
@@ -47,9 +47,9 @@ def _catch_connection_error(f):
     return w
 
 
-class LBRYWallet(object):
-    """This class implements the LBRYWallet interface for the LBRYcrd payment system"""
-    implements(ILBRYWallet)
+class Wallet(object):
+    """This class implements the Wallet interface for the LBRYcrd payment system"""
+    implements(IWallet)
 
     _FIRST_RUN_UNKNOWN = 0
     _FIRST_RUN_YES = 1
@@ -368,6 +368,31 @@ class LBRYWallet(object):
         d.addCallback(_get_id_for_return)
         return d
 
+    def get_my_claim(self, name):
+        def _convert_units(claim):
+            amount = Decimal(claim['nEffectiveAmount'] / COIN)
+            claim['nEffectiveAmount'] = amount
+            return claim
+
+        def _get_claim_for_return(claim):
+            if not claim:
+                return False
+            d = self.get_claim(name, claim['claim_id'])
+            d.addCallback(_convert_units)
+            d.addCallback(lambda clm: self._format_claim_for_return(name, clm, claim['txid']))
+            return d
+
+        def _get_my_unspent_claim(claims):
+            for claim in claims:
+                if claim['name'] == name and not claim['is spent']:
+                    return claim
+            return False
+
+        d = self.get_name_claims()
+        d.addCallback(_get_my_unspent_claim)
+        d.addCallback(_get_claim_for_return)
+        return d
+
     def get_claim_info(self, name, txid=None):
         if not txid:
             d = self._get_value_for_name(name)
@@ -377,9 +402,20 @@ class LBRYWallet(object):
         d.addErrback(lambda _: False)
         return d
 
+    def _format_claim_for_return(self, name, claim, txid, metadata=None, meta_version=None):
+        result = {}
+        result['claim_id'] = claim['claimId']
+        result['amount'] = claim['nEffectiveAmount']
+        result['height'] = claim['nHeight']
+        result['name'] = name
+        result['txid'] = txid
+        result['value'] = metadata if metadata else json.loads(claim['value'])
+        result['supports'] = [{'txid': support['txid'], 'n': support['n']} for support in claim['supports']]
+        result['meta_version'] = meta_version if meta_version else result['value'].get('ver', '0.0.1')
+        return result
+
     def _get_claim_info(self, name, txid):
         def _build_response(claim):
-            result = {}
             try:
                 metadata = Metadata(json.loads(claim['value']))
                 meta_ver = metadata.version
@@ -390,26 +426,11 @@ class LBRYWallet(object):
                 meta_ver = "Non-compliant"
                 d = defer.succeed(None)
 
-            claim_id = claim['claimId']
-            result['claim_id'] = claim_id
-            result['amount'] = claim['nEffectiveAmount']
-            result['height'] = claim['nHeight']
-            result['name'] = name
-            result['txid'] = txid
-            result['value'] = metadata
-            result['supports'] = [{'txid': support['txid'], 'n': support['n']} for support in claim['supports']]
-            result['meta_version'] = meta_ver
+            d.addCallback(lambda _: self._format_claim_for_return(name, claim, txid,
+                                                                  metadata=metadata, meta_version=meta_ver))
+            log.info("get claim info lbry://%s metadata: %s, claimid: %s", name, meta_ver, claim['claimId'])
 
-            log.info("get claim info lbry://%s metadata: %s, claimid: %s", name, meta_ver, claim_id)
-
-            d.addCallback(lambda _: self.get_name_claims())
-            d.addCallback(lambda r: [c['txid'] for c in r])
-            d.addCallback(lambda my_claims: _add_is_mine(result, my_claims))
             return d
-
-        def _add_is_mine(response, my_txs):
-            response['is_mine'] = response['txid'] in my_txs
-            return response
 
         d = self.get_claimid(name, txid)
         d.addCallback(lambda claim_id: self.get_claim(name, claim_id))
@@ -494,8 +515,16 @@ class LBRYWallet(object):
         d.addCallback(self._get_decoded_tx)
         return d
 
+    def get_block_info(self, height):
+        d = self._get_blockhash(height)
+        return d
+
     def get_history(self):
         d = self._get_history()
+        return d
+
+    def address_is_mine(self, address):
+        d = self._address_is_mine(address)
         return d
 
     def get_tx_json(self, txid):
@@ -723,6 +752,9 @@ class LBRYWallet(object):
     def _get_history(self):
         return defer.fail(NotImplementedError())
 
+    def _address_is_mine(self, address):
+        return defer.fail(NotImplementedError())
+
     def _start(self):
         pass
 
@@ -730,9 +762,9 @@ class LBRYWallet(object):
         pass
 
 
-class LBRYcrdWallet(LBRYWallet):
+class LBRYcrdWallet(Wallet):
     def __init__(self, db_dir, wallet_dir=None, wallet_conf=None, lbrycrdd_path=None):
-        LBRYWallet.__init__(self, db_dir)
+        Wallet.__init__(self, db_dir)
         self.started_lbrycrdd = False
         self.wallet_dir = wallet_dir
         self.wallet_conf = wallet_conf
@@ -855,11 +887,17 @@ class LBRYcrdWallet(LBRYWallet):
     def get_claims_from_tx(self, txid):
         return threads.deferToThread(self._get_claims_from_tx_rpc, txid)
 
+    def _get_blockhash(self, blockhash):
+        return threads.deferToThread(self._get_blockhash_rpc, blockhash)
+
     def _get_value_for_name(self, name):
         return threads.deferToThread(self._get_value_for_name_rpc, name)
 
     def _get_history(self):
         return threads.deferToThread(self._list_transactions_rpc)
+
+    def _address_is_mine(self, address):
+        return threads.deferToThread(self._get_address_is_mine_rpc, address)
 
     def _get_rpc_conn(self):
         return AuthServiceProxy(self.rpc_conn_string)
@@ -985,6 +1023,11 @@ class LBRYcrdWallet(LBRYWallet):
         return rpc_conn.getblock(blockhash)
 
     @_catch_connection_error
+    def _get_blockhash_rpc(self, height):
+        rpc_conn = self._get_rpc_conn()
+        return rpc_conn.getblockhash(height)
+
+    @_catch_connection_error
     def _get_claims_from_tx_rpc(self, txid):
         rpc_conn = self._get_rpc_conn()
         return rpc_conn.getclaimsfortx(txid)
@@ -1051,6 +1094,11 @@ class LBRYcrdWallet(LBRYWallet):
         return rpc_conn.listtransactions()
 
     @_catch_connection_error
+    def _get_address_is_mine_rpc(self, address):
+        rpc_conn = self._get_rpc_conn()
+        return address in rpc_conn.getaddressesbyaccount("")
+
+    @_catch_connection_error
     def _stop_rpc(self):
         # check if our lbrycrdd is actually running, or if we connected to one that was already
         # running and ours failed to start
@@ -1060,10 +1108,10 @@ class LBRYcrdWallet(LBRYWallet):
             self.lbrycrdd.wait()
 
 
-class LBRYumWallet(LBRYWallet):
+class LBRYumWallet(Wallet):
 
     def __init__(self, db_dir):
-        LBRYWallet.__init__(self, db_dir)
+        Wallet.__init__(self, db_dir)
         self.config = None
         self.network = None
         self.wallet = None
@@ -1141,8 +1189,8 @@ class LBRYumWallet(LBRYWallet):
 
         def get_wallet():
             path = self.config.get_wallet_path()
-            storage = WalletStorage(path)
-            wallet = Wallet(storage)
+            storage = lbryum.wallet.WalletStorage(path)
+            wallet = lbryum.wallet.Wallet(storage)
             if not storage.file_exists:
                 self.first_run = True
                 seed = wallet.make_seed()
@@ -1208,8 +1256,7 @@ class LBRYumWallet(LBRYWallet):
         accounts = None
         exclude_claimtrietx = True
         d = threads.deferToThread(func, accounts, exclude_claimtrietx)
-        d.addCallback(lambda result: result['confirmed'])
-        d.addCallback(Decimal)
+        d.addCallback(lambda result: Decimal(result['confirmed']) + Decimal(result.get('unconfirmed', 0.0)))
         return d
 
     def get_new_address(self):
@@ -1228,6 +1275,11 @@ class LBRYumWallet(LBRYWallet):
 
     def get_best_blockhash(self):
         height = self.network.get_local_height()
+        d = threads.deferToThread(self.network.blockchain.read_header, height)
+        d.addCallback(lambda header: self.network.blockchain.hash_header(header))
+        return d
+
+    def _get_blockhash(self, height):
         d = threads.deferToThread(self.network.blockchain.read_header, height)
         d.addCallback(lambda header: self.network.blockchain.hash_header(header))
         return d
@@ -1343,6 +1395,11 @@ class LBRYumWallet(LBRYWallet):
         cmd = known_commands['history']
         func = getattr(self.cmd_runner, cmd.name)
         return threads.deferToThread(func)
+
+    def _address_is_mine(self, address):
+        cmd = known_commands['ismine']
+        func = getattr(self.cmd_runner, cmd.name)
+        return threads.deferToThread(func, address)
 
     def get_pub_keys(self, wallet):
         cmd = known_commands['getpubkeys']

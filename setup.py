@@ -44,7 +44,8 @@ requires = [
     'six==1.9.0',
     'base58',
     'googlefinance',
-    'requests_futures'
+    'requests_futures',
+    'PyYAML'
 ]
 
 console_scripts = [
@@ -56,9 +57,9 @@ console_scripts = [
     # 'lbrynet-rpc-node-cli = lbrynet.node_rpc_cli:main',
     # 'lbrynet-lookup-hosts-for-hash = lbrynet.dht_scripts:get_hosts_for_hash_in_dht',
     # 'lbrynet-announce_hash_to_dht = lbrynet.dht_scripts:announce_hash_to_dht',
-    'lbrynet-daemon = lbrynet.lbrynet_daemon.LBRYDaemonControl:start',
-    'stop-lbrynet-daemon = lbrynet.lbrynet_daemon.LBRYDaemonControl:stop',
-    'lbrynet-cli = lbrynet.lbrynet_daemon.LBRYDaemonCLI:main'
+    'lbrynet-daemon = lbrynet.lbrynet_daemon.DaemonControl:start',
+    'stop-lbrynet-daemon = lbrynet.lbrynet_daemon.DaemonControl:stop',
+    'lbrynet-cli = lbrynet.lbrynet_daemon.DaemonCLI:main'
 ]
 
 if platform == LINUX:
@@ -156,32 +157,32 @@ elif platform == WINDOWS:
          None,  # ShowCmd
          'TARGETDIR',  # WkDir
          ),
-        ('DaemonShortcut',  # Shortcut
-         'DesktopFolder',  # Directory
-         'lbrynet-daemon',  # Name
-         'TARGETDIR',  # Component
-         '[TARGETDIR]\lbrynet-daemon.exe',  # Target
-         '--log-to-console',  # Arguments
-         description,  # Description
-         None,  # Hotkey
-         None,  # Icon
-         None,  # IconIndex
-         None,  # ShowCmd
-         'TARGETDIR',  # WkDir
-         ),
-        ('DaemonCLIShortcut',  # Shortcut
-         'DesktopFolder',  # Directory
-         'lbrynet-cli',  # Name
-         'TARGETDIR',  # Component
-         '[TARGETDIR]\lbrynet-cli.exe',  # Target
-         None,  # Arguments
-         description,  # Description
-         None,  # Hotkey
-         None,  # Icon
-         None,  # IconIndex
-         None,  # ShowCmd
-         'TARGETDIR',  # WkDir
-         ),
+        # ('DaemonShortcut',  # Shortcut
+        #  'DesktopFolder',  # Directory
+        #  'lbrynet-daemon',  # Name
+        #  'TARGETDIR',  # Component
+        #  '[TARGETDIR]\lbrynet-daemon.exe',  # Target
+        #  '--log-to-console',  # Arguments
+        #  description,  # Description
+        #  None,  # Hotkey
+        #  None,  # Icon
+        #  None,  # IconIndex
+        #  None,  # ShowCmd
+        #  'TARGETDIR',  # WkDir
+        #  ),
+        # ('DaemonCLIShortcut',  # Shortcut
+        #  'DesktopFolder',  # Directory
+        #  'lbrynet-cli',  # Name
+        #  'TARGETDIR',  # Component
+        #  '[TARGETDIR]\lbrynet-cli.exe',  # Target
+        #  None,  # Arguments
+        #  description,  # Description
+        #  None,  # Hotkey
+        #  None,  # Icon
+        #  None,  # IconIndex
+        #  None,  # ShowCmd
+        #  'TARGETDIR',  # WkDir
+        #  ),
         ('ProgramMenuLBRYShortcut',  # Shortcut
          'ProgramMenuFolder',  # Directory
          # r'[ProgramMenuFolder]\lbrynet',  # Directory
@@ -273,7 +274,8 @@ elif platform == WINDOWS:
                      'wsgiref',
                      'zope.interface',
                      'os',
-                     'pkg_resources'
+                     'pkg_resources',
+                     'yaml'
                      ],
         'excludes': ['distutils', 'collections.sys', 'collections._weakref', 'collections.abc',
                      'Tkinter', 'tk', 'tcl', 'PyQt4', 'nose', 'mock'
@@ -301,7 +303,7 @@ elif platform == WINDOWS:
     )
 
     daemon_exe = Executable(
-        script=os.path.join(daemon_dir, 'LBRYDaemonControl.py'),
+        script=os.path.join(daemon_dir, 'DaemonControl.py'),
         icon=win_icon,
         # shortcutName="lbrynet-daemon",
         # shortcutDir='DesktopFolder',
@@ -309,7 +311,7 @@ elif platform == WINDOWS:
     )
 
     cli_exe = Executable(
-        script=os.path.join(daemon_dir, 'LBRYDaemonCLI.py'),
+        script=os.path.join(daemon_dir, 'DaemonCLI.py'),
         icon=win_icon,
         # shortcutName="lbrynet-cli",
         # shortcutDir='DesktopFolder',

@@ -6,10 +6,10 @@ import json
 
 from urllib2 import urlopen
 from StringIO import StringIO
-from twisted.web import static
 from twisted.internet import defer
 from twisted.internet.task import LoopingCall
 from lbrynet.conf import DEFAULT_UI_BRANCH, LOG_FILE_NAME
+from lbrynet.lbrynet_daemon.Resources import NoCacheStaticFile
 from lbrynet import __version__ as lbrynet_version
 from lbryum.version import LBRYUM_VERSION as lbryum_version
 from zipfile import ZipFile
@@ -27,7 +27,7 @@ lbrynet_log = os.path.join(log_dir, LOG_FILE_NAME)
 log = logging.getLogger(__name__)
 
 
-class LBRYUIManager(object):
+class UIManager(object):
     def __init__(self, root):
         if sys.platform != "darwin":
             self.data_dir = os.path.join(os.path.expanduser("~"), '.lbrynet')
@@ -235,5 +235,5 @@ class LBRYUIManager(object):
 
     def _load_ui(self):
         for d in [i[0] for i in os.walk(self.active_dir) if os.path.dirname(i[0]) == self.active_dir]:
-            self.root.putChild(os.path.basename(d), static.File(d))
+            self.root.putChild(os.path.basename(d), NoCacheStaticFile(d))
         return defer.succeed(True)
